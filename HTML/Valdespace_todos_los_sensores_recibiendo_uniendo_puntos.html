@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ValdeSpace</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-GLhlTQ8iRABdZLl6O3oVMWSktQOp6b7In1Zl3/Jr59b6EGGoI1aFkw7cmDA6j6gD" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js" integrity="sha384-w76AqPfDkMBDXo30jS1Sgez6pr3x5MlQ1ZAGC+nuZB+EYdgRZgiwxhTBTkF7CXvN" crossorigin="anonymous"></script>
+    <script src="https://code.highcharts.com/highcharts.js"></script>
+    <script src="https://code.highcharts.com/modules/series-label.js"></script>
+    <script src="https://code.highcharts.com/modules/exporting.js"></script>
+    <script src="https://code.highcharts.com/modules/export-data.js"></script>
+    <script src="https://code.highcharts.com/modules/accessibility.js"></script>
+    <script
+      src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB41DRUbKWJHPxaFjMAwdrzWzbVKartNGg&callback=initMap&v=weekly"
+      defer
+    ></script>
+
+    <style>
+        #map {
+            height: 75%;
+        }
+    </style>
+  
+
+
+    
+    <script>
+        var chart_temperature;  
+        var chart_pressure;  
+        var chart_altitude;  
+        var chart_methane;
+        var chart_density;
+        var temperatures = [];
+        var pressures = [];
+        var altitudes = [];
+        var densities = [];
+        var methanes = [];
+        var positions = [];
+        var data_to_export = [];
+        var stop_read = 0;
+        var actualPos={}
+        var polyline;
+
+        const IDEAL_GASES_R = 8.314
+        
+        var colors = ['#FF530D', '#00FF00', '#0000FF', '#800080', '#E80C7A'];
+
+        function initMap() {
+            let tardientaLatLng = { lat: 41.96008491106405, lng: -0.5422386934669573 };
+            const map = new google.maps.Map(document.getElementById("map"), {
+                zoom: 6,
+                center: tardientaLatLng,
+            });
+        }
+
+
+        // Adds a marker to the map.
+        function addMarker(location, map, title = "") {
+          new google.maps.Marker({
+            position: location,
+            map: map,
+            title: title,
+            icon: 'rocket.png'
+          });
+        
+          positions.push({lat:location.lat, lng:location.lng});
+          polyline.setPath(positions);
+          map.setCenter(location);
+          map.setZoom(16);
+          polyline.setMap(map);
+
+        }
+
+        window.initMap = initMap;        
+
+        function create_chart(container, title, subtitle, series_name, color) {
+            chart = Highcharts.chart(container, {
+                colors: color,
+                title: {
+                    text: title,
+                    align: 'left'
+                },
+
+                subtitle: {
+                    text: subtitle,
+                    align: 'left'
+                },
+
+                yAxis: {
+                    title: {
+                        text: series_name
+                    }
+                },
+
+                xAxis: {
+                    title: {
+                        text: 'Seconds'
+                    },
+                    accessibility: {
+                        rangeDescription: 'Range: Tiempos'
+                    }
+                },
+
+                legend: {
+                    layout: 'vertical',
+                    align: 'right',
+                    verticalAlign: 'middle'
+                },
+
+                plotOptions: {
+                    series: {
+                        label: {
+                            connectorAllowed: false
+                        },
+                        pointStart: 0
+                    }
+                },
+
+                series: [{
+                    name: series_name,
+                    data: [],
+                    
+                }],
+
+                responsive: {
+                    rules: [{
+                        condition: {
+                            maxWidth: 500
+                        },
+                        chartOptions: {
+                            legend: {
+                                layout: 'horizontal',
+                                align: 'center',
+                                verticalAlign: 'bottom'
+                            }
+                        }
+                    }]
+                }
+
+                });
+            return chart
+        }
+
+        function newfakemarker(map) {
+            actualPos.lat = actualPos.lat + Math.random()/1000;
+            actualPos.lng = actualPos.lng + Math.random()/1000;
+            addMarker(actualPos, map, "TARDIENTA");
+        }   
+
+        async function start() 
+        {
+               let tardientaLatLng = { lat: 41.96008491106405, lng: -0.5422386934669573 };
+               const map = new google.maps.Map(document.getElementById("map"), {
+                zoom: 6,
+                center: tardientaLatLng,
+                });
+                                  
+                let iesLatLng = { lat: 41.62646572014017, lng: -0.9301194920378676 };
+                
+                polyline = new google.maps.Polyline({
+                    // set desired options for color, opacity, width, etc.
+                    strokeColor:"#0000FF",  // blue (RRGGBB, R=red, G=green, B=blue)
+                    strokeOpacity: 0.4      // opacity of line
+                }); 
+                actualPos = iesLatLng;
+                map.setCenter(iesLatLng);
+                map.setZoom(16);
+                // Prompt user to select any serial port.
+                const port = await navigator.serial.requestPort();
+
+                // Wait for the serial port to open.
+                await port.open({ baudRate: 9600 });
+                const reader = port.readable.getReader();
+                total_data = '';
+                console.log("starting");
+                function readLoop() {
+                    console.log(stop_read);
+                    if (!stop_read) {
+                        reader.read().then(result => {
+                            if (result.done) return;
+                            const decoder = new TextDecoder();
+                            const data = decoder.decode(result.value);
+                            //console.log(data)
+                            total_data += data;
+                            if (total_data.includes("\n")) {
+                                console.log(total_data)
+                                data_to_export.push(total_data);
+                                datos = total_data.split(',');
+                                T = parseFloat(datos[1]);
+                                P = parseFloat(datos[2]);
+                                A = parseFloat(datos[3]);
+                                M = parseFloat(datos[4]);  
+
+
+                                // Comprobar: si el datos[5] es Location del CANSAT, descomentar siguiente línea, sino asignar el dato correspondiente que llega desde el sensor
+                                //cansatLocation = parseFloat(datos[5]);
+                                
+                                // Como ejemplo vamos a usar el siguiente dato:
+                                
+                                let cansatLatLng = { lat: parseFloat(datos[5]), lng: parseFloat(datos[6]) };
+                                //Call addMarker function to add CANSAT's current location 
+                                addMarker(cansatLatLng, map, "CANSAT's current location");    
+                                
+                                temperatures.push(T);
+                                pressures.push(P);
+                                altitudes.push(A);
+                                methanes.push(M);
+                                density = P * 0.02897/ (IDEAL_GASES_R * (T + 273.15));
+                                densities.push(density);
+                                chart_temperature.series[0].update({
+                                    data: temperatures
+                                }, true);
+                                chart_pressure.series[0].update({
+                                    data: pressures
+                                }, true);
+                                chart_altitude.series[0].update({
+                                    data: altitudes
+                                }, true);
+                                chart_methane.series[0].update({
+                                    data: methanes
+                                }, true);
+                                chart_density.series[0].update({
+                                    data: densities
+                                }, true);
+                                total_data = "";
+                            }
+                            readLoop();
+                        });
+                        console.log("reading");
+                        
+                    }
+                   
+                }
+                readLoop();
+                
+        }
+
+        function stop() {
+            stop_read = 1;
+        }
+
+        function export_data() {
+                                //Get the GEO data from CANSAT  example: { lat: 12.97, lng: 77.59 }
+            let csvContent = "data:text/csv;charset=utf-8,";
+            data_to_export.forEach(function(row){
+                console.log("dato");
+                csvContent += row;
+            });
+            var encodedUri = encodeURI(csvContent);
+            var link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "datos_recibidos.csv");
+            document.body.appendChild(link); // Required for FF
+
+            link.click();
+        }
+        
+
+        window.onload = function(){
+            if ("serial" in navigator) {
+                alert("Your browser supports Web Serial API!");
+                chart_temperature = create_chart('temperature','Temperature','Temperature per second','Temperatures', [colors[0]]);
+                chart_pressure = create_chart('pressure','Pressure','Pressure per second','Pressures', [colors[1]]);
+                chart_altitude = create_chart('altitude','Altitude','Altitude per second','Altitudes', [colors[2]]);
+                chart_methane = create_chart('methane','Methane','Methane per second','Methanes', [colors[3]]);
+                chart_density = create_chart('air_density','Air Density','Density per second','Densities', [colors[4]]);
+            
+            } else {
+                alert("Your browser does not support Web Serial API, the latest version of Google Chrome is recommended!");
+            };
+        }
+    
+    </script>
+  </head>
+  <body>
+    <div class="container">
+        <div class="row">
+            <div class="col-4">
+                 <figure class="highcharts-figure">
+                    <div id="temperature"></div>
+                    
+                </figure>
+            </div>
+            <div class="col-4">
+                 <figure class="highcharts-figure">
+                    <div id="pressure"></div>
+                    
+                </figure>
+            </div>
+            <div class="col-4">
+                 <figure class="highcharts-figure">
+                    <div id="altitude"></div>
+                    
+                </figure>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-4">
+                 <figure class="highcharts-figure">
+                    <div id="methane"></div>
+                    
+                </figure>
+            </div>
+            <div class="col-4">
+                 <figure class="highcharts-figure">
+                    <div id="air_density"></div>
+                    
+                </figure>
+            </div>
+            <div class="col-4">
+                <div class="highcharts-title">GPS</div>
+                <div id="map"></div>
+                
+                
+            </div>
+        </div>
+        <div class="row">
+            <div class="col text-center">
+                <button class="btn btn-primary" onclick="start()">Empezar a recibir datos</button> 
+                <button class="btn btn-primary" onclick="stop()">Parar</button> 
+                <button class="btn btn-primary" onclick="export_data()">Exportar datos</button> 
+            </div>
+            
+
+        </div>
+        
+    </div>
+   
+   
+  </body>
+</html>
